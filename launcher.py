@@ -21,6 +21,8 @@ import shutil
 #You should have received a copy of the GNU General Public License
 #along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+alreadybackedup = False
+
 def makedir(dir):
 	if not os.path.exists(dir):
 		os.makedirs(dir)
@@ -67,6 +69,86 @@ class pathsave():
 		
 		self.setfile(save)
 
+def getbackupdir(romfile, mcsbakdir):
+	name = getromname(romfile)
+	
+	backupdir = os.path.join(mcsbakdir, name)
+	makedir(backupdir)
+
+	return backupdir
+
+def getncqfile(mcsdir, name):
+	ncqfile = os.listdir(mcsdir)
+
+	filestoberemoved = []
+
+	for file in ncqfile:
+		if file.split(".")[0] != name:
+			filestoberemoved.append(file)
+
+	for file in filestoberemoved:
+		ncqfile.remove(file)
+
+	if len(ncqfile) == 1:
+		#can be backed up
+		return os.path.join(mcsdir, ncqfile[0])
+	elif len(ncqfile) == 0:
+		#no file
+		return []
+		md = gtk.MessageDialog(self, gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_WARNING, gtk.BUTTONS_CLOSE, "No save file")
+		md.run()
+		md.destroy()
+		print "Warning: no file!"
+	else:
+		#many files
+		print "Error: too many files!"
+		md = gtk.MessageDialog(self, gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR, gtk.BUTTONS_CLOSE, "Multiple Save Files")
+		md.run()
+		md.destroy()
+		
+		filter = gtk.FileFilter()
+		filter.set_name("Mednafen saved states")
+		filter.add_pattern("*.ncq")
+		
+		new_ncqfile = SelectFile(main_window.window, mcsdir, [filter])
+		
+		if new_ncqfile == None:
+			return None
+		else:
+			return new_ncqfile
+
+def dobackup(romfile, mcsdir, mcsbakdir):
+	global alreadybackedup
+	
+	if alreadybackedup == False:
+		error = False
+		
+		name = getromname(romfile)
+		
+		backupdir = getbackupdir(romfile, mcsbakdir)
+
+		backupfiles = sorted(os.listdir(backupdir))
+		if backupfiles == []:
+			newnumber = 0
+		else:
+			number = int(backupfiles[-1].split(".")[0])
+			newnumber = number + 1
+		newnumber = str(newnumber).zfill(4)
+		newnumberfile = newnumber + ".ncq"
+		
+		ncqfile = getncqfile(mcsdir, name)
+		
+		if ncqfile == None:
+			error = True
+		elif ncqfile == []:
+			pass #No file
+		else:
+			shutil.copy(ncqfile, os.path.join(backupdir, newnumberfile))
+		
+		alreadybackedup = True
+		
+		return error
+
 class main():
 	def __init__(self, pathsaver):
 		self.pathsaver = pathsaver
@@ -93,6 +175,11 @@ class main():
 		self.baktogglebox.pack_start(self.baktoggleswitch)
 		self.baktoggleswitch.show()
 		
+		self.restorebutton = gtk.Button("Restore Backup")
+		self.restorebutton.connect("clicked", self.browserestore, None)
+		self.baktogglebox.pack_start(self.restorebutton)
+		self.restorebutton.show()
+		
 		self.vlayout.pack_start(self.baktogglebox)
 		self.baktogglebox.show()
 
@@ -112,16 +199,24 @@ class main():
 	def windowdestroy(self, widget, data=None):
 		gtk.main_quit()
 	
-	def launch(self, widget, data=None):
+	def getromfile(self):
 		romdir = self.romdirentry.get_text()
+		romname = self.romentry.get_text()
+		romfile = os.path.join(romdir, romname)
+		
+		return romfile
+	
+	def getbackupdata(self):
 		mcsdir = self.mcsentry.get_text()
 		mcsbakdir = self.bakentry.get_text()
-		romname = self.romentry.get_text()
 		backup = self.baktoggleswitch.get_active()
-
-		self.window.destroy()
+		romfile = self.getromfile()
 		
-		romfile = os.path.join(romdir, romname)
+		return romfile, mcsdir, mcsbakdir, backup
+	
+	def launch(self, widget, data=None):
+		romfile, mcsdir, mcsbakdir, backup = self.getbackupdata()
+		self.window.destroy()
 		
 		launchMednafen(romfile, mcsdir, mcsbakdir, backup)
 	
@@ -157,13 +252,23 @@ class main():
 		filter.add_pattern("*.gba")
 		
 		self.browse("roms", self.getrom, self.romdirentry.get_text(), [filter])
-
+	
+	def browserestore(self, widget, data=None):
+		filter = gtk.FileFilter()
+		filter.set_name("Mednafen saved states")
+		filter.add_pattern("*.ncq")
+		
+		romfile, mcsdir, mcsbakdir, backup = self.getbackupdata()
+		dobackup(romfile, mcsdir, mcsbakdir)
+		
+		self.browse("backups", self.restore, getbackupdir(romfile, mcsbakdir), [filter])
+	
 	def browseromdir(self, widget, data=None):
 		self.browsedir("Rom", self.getromdir, upLevel(self.romdirentry.get_text()))
 		
 	def browsemcsdir(self, widget, data=None):
 		self.browsedir("Mcs", self.getmcsdir, upLevel(self.mcsentry.get_text()))
-
+	
 	def browsebakdir(self, widget, data=None):
 		self.browsedir("Backup", self.getbakdir, upLevel(self.bakentry.get_text()))
 	
@@ -183,6 +288,14 @@ class main():
 		self.pathsaver.set("rom", romname)
 		
 		self.getromdir(upLevel(file))
+
+	def restore(self, file):
+		romfile, mcsdir, mcsbakdir, backup = self.getbackupdata()
+		name = getromname(romfile)
+		ncqfile = getncqfile(mcsdir, name)
+		
+		shutil.copy(file, ncqfile)
+		print file, ncqfile
 
 	def getromdir(self, dir):
 		self.romdirentry.set_text(dir)
@@ -262,40 +375,8 @@ def launchMednafen(romfile, mcsdir, mcsbakdir, backup):
 		name = getromname(romfile)
 		
 		if backup:
-			backupdir = os.path.join(mcsbakdir, name)
-			
-			makedir(backupdir)
-			
-			backupfiles = sorted(os.listdir(backupdir))
-			if backupfiles == []:
-				newnumber = 0
-			else:
-				number = int(backupfiles[-1].split(".")[0])
-				newnumber = number + 1
-			newnumber = str(newnumber).zfill(4)
-			newnumberfile = newnumber + ".ncq"
-			
-			ncqfile = os.listdir(mcsdir)
-			
-			filestoberemoved = []
-			
-			for file in ncqfile:
-				if file.split(".")[0] != name:
-					filestoberemoved.append(file)
-			
-			for file in filestoberemoved:
-				ncqfile.remove(file)
-			
-			if len(ncqfile) == 1:
-				#can be backed up
-				shutil.copy(os.path.join(mcsdir, ncqfile[0]), os.path.join(backupdir, newnumberfile))
-			elif len(ncqfile) == 0:
-				#no file
-				print "Warning: no file!"
-			else:
-				#many files
-				print "Error: too many files!"
-				print ncqfile
+			backuperror = dobackup(romfile, mcsdir, mcsbakdir)
+			if backuperror:
 				launch = False
 		
 		if launch:
