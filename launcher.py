@@ -4,6 +4,9 @@ import os
 import gtk
 import subprocess
 import shutil
+import gio
+import glib
+import threading
 
 #A symple mednafen launcher in pygtk
 #Copyright (C) 2012 Ian Campbell
@@ -77,13 +80,15 @@ def getbackupdir(romfile, mcsbakdir):
 
 	return backupdir
 
-def getncqfile(mcsdir, name):
+def getncqfile(mcsdir, name, ending="ncq", errorcorrection=True):
 	ncqfile = os.listdir(mcsdir)
 
 	filestoberemoved = []
 
 	for file in ncqfile:
 		if file.split(".")[0] != name:
+			filestoberemoved.append(file)
+		elif file.split(".")[-1] != ending:
 			filestoberemoved.append(file)
 
 	for file in filestoberemoved:
@@ -94,39 +99,41 @@ def getncqfile(mcsdir, name):
 		return os.path.join(mcsdir, ncqfile[0])
 	elif len(ncqfile) == 0:
 		#no file
-		return []
-		md = gtk.MessageDialog(self, gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_WARNING, gtk.BUTTONS_CLOSE, "No save file")
-		md.run()
-		md.destroy()
-		print "Warning: no file!"
+		if errorcorrection:
+			return []
+			md = gtk.MessageDialog(None, gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_WARNING, gtk.BUTTONS_CLOSE, "No save file")
+			md.run()
+			md.destroy()
+			print "Warning: no file!"
 	else:
-		#many files
-		print "Error: too many files!"
-		md = gtk.MessageDialog(self, gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR, gtk.BUTTONS_CLOSE, "Multiple Save Files")
-		md.run()
-		md.destroy()
-		
-		filter = gtk.FileFilter()
-		filter.set_name("Mednafen saved states")
-		filter.add_pattern("*.ncq")
-		
-		new_ncqfile = SelectFile(main_window.window, mcsdir, [filter])
-		
-		if new_ncqfile == None:
-			return None
-		else:
-			return new_ncqfile
+		if errorcorrection:
+			#many files
+			print "Error: too many files!"
+			md = gtk.MessageDialog(None, gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_ERROR, gtk.BUTTONS_CLOSE, "Multiple Save Files")
+			md.run()
+			md.destroy()
+			
+			filter = gtk.FileFilter()
+			filter.set_name("Mednafen saved states")
+			filter.add_pattern("*.ncq")
+			
+			new_ncqfile = SelectFile(main_window.window, mcsdir, [filter])
+			
+			if new_ncqfile == None:
+				return None
+			else:
+				return new_ncqfile
 
-def dobackup(romfile, mcsdir, mcsbakdir):
+def dobackup(ncqfile, romfile, mcsbakdir, overridealreadybackedup=False):
 	global alreadybackedup
 	
-	if alreadybackedup == False:
+	if alreadybackedup == False or overridealreadybackedup == True:
 		error = False
 		
 		name = getromname(romfile)
-		
+				
 		backupdir = getbackupdir(romfile, mcsbakdir)
-
+		
 		backupfiles = sorted(os.listdir(backupdir))
 		if backupfiles == []:
 			newnumber = 0
@@ -136,7 +143,6 @@ def dobackup(romfile, mcsdir, mcsbakdir):
 		newnumber = str(newnumber).zfill(4)
 		newnumberfile = newnumber + ".ncq"
 		
-		ncqfile = getncqfile(mcsdir, name)
 		
 		if ncqfile == None:
 			error = True
@@ -259,7 +265,8 @@ class main():
 		filter.add_pattern("*.ncq")
 		
 		romfile, mcsdir, mcsbakdir, backup = self.getbackupdata()
-		dobackup(romfile, mcsdir, mcsbakdir)
+		ncqfile = getncqfile(mcsdir, getromname(romfile))
+		backuperror = dobackup(ncqfile, romfile, mcsbakdir)
 		
 		self.browse("backups", self.restore, getbackupdir(romfile, mcsbakdir), [filter])
 	
@@ -368,6 +375,12 @@ def SelectDir(parent, directory, name):
 def getromname(romfile):
 	return ".".join(romfile.split("/")[-1].split(".")[:-1])
 
+def mednafen(romfile):
+	subprocess.call(["mednafen", romfile])
+
+def getnc0file(mcsdir, name):
+	return getncqfile(mcsdir, name, "nc0", True)
+
 def launchMednafen(romfile, mcsdir, mcsbakdir, backup):
 	if romfile != None and romfile != "":
 		launch = True
@@ -375,12 +388,20 @@ def launchMednafen(romfile, mcsdir, mcsbakdir, backup):
 		name = getromname(romfile)
 		
 		if backup:
-			backuperror = dobackup(romfile, mcsdir, mcsbakdir)
+			ncqfile = getncqfile(mcsdir, getromname(romfile))
+			backuperror = dobackup(ncqfile, romfile, mcsbakdir)
 			if backuperror:
 				launch = False
 		
 		if launch:
-			subprocess.call(["mednafen", romfile])
+			mednafen(romfile)
+		
+		if backup:
+			nc0file = getnc0file(mcsdir, getromname(romfile))
+			if nc0file != None:
+				print "nc0file found!"
+				dobackup(nc0file, romfile, mcsbakdir, True)
+				os.remove(nc0file)
 
 if __name__ == "__main__":
 	pathsaver = pathsave()
