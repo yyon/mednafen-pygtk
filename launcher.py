@@ -404,6 +404,8 @@ def launchMednafen(romfile, mcsdir, mcsbakdir, backup):
 				os.remove(nc0file)
 
 if __name__ == "__main__":
+	makedir(os.path.join(os.getenv("HOME"), ".mednafen"))
+	
 	pathsaver = pathsave()
 	for dir in [pathsaver.get("romdir"), pathsaver.get("mcsdir"), pathsaver.get("bakdir")]:
 		makedir(dir)
